@@ -1068,6 +1068,17 @@ extension NativeTextViewCoordinator {
             let isLegacyBulletGlyph = markerString.first == "•"
             let minDepth = isLegacyBulletGlyph ? 1 : 0
             if depth <= minDepth {
+                // Already at the top level, so the next outdent leaves the list:
+                // strip the marker (and a task item's box) and the line becomes
+                // a plain paragraph.
+                var prefixLen = match.range(at: 0).length
+                let rest = (line as NSString).substring(from: prefixLen)
+                if let boxRegex = try? NSRegularExpression(pattern: #"^\[[ xX]\][\t ]+"#),
+                   let boxMatch = boxRegex.firstMatch(in: rest, range: NSRange(location: 0, length: rest.utf16.count)) {
+                    prefixLen += boxMatch.range.length
+                }
+                MarkdownLists.performEdit(textView, replace: NSRange(location: lineRange.location, length: prefixLen), with: "")
+                textView.setSelectedRange(NSRange(location: max(lineRange.location, caretLoc - prefixLen), length: 0))
                 return true
             }
 
