@@ -22,7 +22,9 @@ extension NSAttributedString.Key {
     /// paints that many vertical bars in the left gutter.
     static let blockquoteLevel = NSAttributedString.Key("BlockquoteLevel")
     /// Marks a bullet-list marker char (`-`/`*`/`+`) whose glyph is hidden so
-    /// the fragment can paint a `•` in its place. Set to `true`.
+    /// the fragment can paint a dot in its place. The value is the item's
+    /// Int nesting depth (0 = top level): 0 draws a filled dot, deeper draws
+    /// a hollow ring.
     static let bulletMarker = NSAttributedString.Key("BulletListMarker")
     static let orderedMarker = NSAttributedString.Key("OrderedListMarker")
     /// CGFloat — natural image width; presence flags block as overlay-rendered.
@@ -588,10 +590,13 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
 
     // MARK: - Bullet Markers
 
-    /// Paint a `•` over every hidden bullet marker (`.bulletMarker`). The
-    /// glyph is drawn in the same font as the source so its baseline matches
-    /// the surrounding text, and centered within the original marker char's
-    /// advance so a `•` of a different width still sits where `-`/`*`/`+` was.
+    /// Paint a dot over every hidden bullet marker (`.bulletMarker`, valued
+    /// with the item's nesting depth). The dot is a vector circle — filled at
+    /// the top level, a hollow ring when nested — sized off the font and
+    /// centered within the original marker char's advance so it sits where
+    /// `-`/`*`/`+` was. Vector rather than the font's `•` glyph: the text
+    /// bullet renders too light next to the reference app's marker, and a
+    /// path gives exact per-depth control.
     private func drawBulletMarkers(at point: CGPoint, in context: CGContext) {
         guard let ts = textStorage, let range = fragmentNSRange, range.length > 0 else { return }
         let selectionRanges: [NSRange] = {
@@ -609,14 +614,14 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
         let storageString = ts.string as NSString
 
         ts.enumerateAttribute(.bulletMarker, in: range, options: []) { [weak self] value, attrRange, _ in
-            guard let self, (value as? Bool) == true else { return }
+            guard let self, let depth = value as? Int else { return }
             guard let pos = self.drawPosition(forDocumentCharAt: attrRange.location, point: point) else { return }
 
             let font = (ts.attribute(.font, at: attrRange.location, effectiveRange: nil) as? NSFont)
                 ?? (self.textLayoutManager?.textContainer?.textView?.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize))
             // A `.bulletMarker` range means the styler painted the raw char
             // `.clear`, so something must ALWAYS be drawn over the slot. Outside
-            // a selection that's the rendered `•`; while the marker sits inside
+            // a selection that's the rendered dot; while the marker sits inside
             // a selection the raw source char (`-`/`*`/`+`) is painted instead,
             // so selecting a list line reveals its raw syntax. (The styler's own
             // reveal is caret-based and doesn't fire for selections — an earlier
@@ -624,16 +629,40 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
             // an empty slot wherever the selection anchor wasn't in the marker.)
             let isSelected = selectionRanges.contains(where: { NSIntersectionRange($0, attrRange).length > 0 })
             let raw = storageString.substring(with: attrRange)
-            let glyph = (isSelected ? raw : "•") as NSString
-            let glyphAttrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: theme.bodyText]
-
             let markerWidth = (raw as NSString).size(withAttributes: [.font: font]).width
-            let glyphWidth = glyph.size(withAttributes: glyphAttrs).width
-            let xOffset = max(0, (markerWidth - glyphWidth) / 2)
-            // Flipped context: text origin is its top edge, baseline sits one
-            // ascent below — so top = baseline − ascent aligns the glyph.
-            let topY = pos.baselineY - font.ascender
-            glyph.draw(at: CGPoint(x: pos.x + xOffset, y: topY), withAttributes: glyphAttrs)
+
+            if isSelected {
+                let glyph = raw as NSString
+                let glyphAttrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: theme.bodyText]
+                let glyphWidth = glyph.size(withAttributes: glyphAttrs).width
+                let xOffset = max(0, (markerWidth - glyphWidth) / 2)
+                // Flipped context: text origin is its top edge, baseline sits one
+                // ascent below — so top = baseline − ascent aligns the glyph.
+                let topY = pos.baselineY - font.ascender
+                glyph.draw(at: CGPoint(x: pos.x + xOffset, y: topY), withAttributes: glyphAttrs)
+                return
+            }
+
+            // Sizes are em-based so the dot tracks the font (and any zoom).
+            // 0.34em filled / 0.36em ring outer match the reference app's
+            // markers measured at 16px.
+            let diameter = font.pointSize * (depth == 0 ? 0.34 : 0.36)
+            let centerX = pos.x + markerWidth / 2
+            // Circles are symmetric, so centering is flip-agnostic: mid
+            // x-height is the marker's optical center next to lowercase text.
+            let centerY = pos.baselineY - font.xHeight / 2
+            let rect = CGRect(x: centerX - diameter / 2, y: centerY - diameter / 2,
+                              width: diameter, height: diameter)
+            if depth == 0 {
+                theme.bodyText.setFill()
+                NSBezierPath(ovalIn: rect).fill()
+            } else {
+                theme.bodyText.setStroke()
+                let lineWidth = max(1, font.pointSize * 0.055)
+                let ring = NSBezierPath(ovalIn: rect.insetBy(dx: lineWidth / 2, dy: lineWidth / 2))
+                ring.lineWidth = lineWidth
+                ring.stroke()
+            }
         }
     }
 

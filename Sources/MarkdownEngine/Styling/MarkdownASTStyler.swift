@@ -388,7 +388,8 @@ enum MarkdownASTStyler {
             }
             return HeadingHelpers.textWidth(ctx.ns.substring(with: markerGroup), font: ctx.baseFont)
         }()
-        let depthIndent = CGFloat(MarkdownLists.indentLevel(from: ws)) * ctx.config.lists.indentPerLevel
+        let depth = MarkdownLists.indentLevel(from: ws)
+        let depthIndent = CGFloat(depth) * ctx.config.lists.indentPerLevel
         let ps = NSMutableParagraphStyle()
         let lineHeight = ctx.baseLineHeight + ctx.config.lists.extraLineHeight
         ps.minimumLineHeight = lineHeight
@@ -433,7 +434,10 @@ enum MarkdownASTStyler {
             let syntax = NSRange(location: item.marker.location,
                                  length: item.contentRange.location - item.marker.location)
             if NSLocationInRange(ctx.caret, syntax) { return }
-            attrs.append((item.marker, [.bulletMarker: true, .foregroundColor: NSColor.clear]))
+            // The attribute value is the item's nesting depth: the fragment
+            // renderer draws a filled dot at the top level and a hollow ring
+            // when nested.
+            attrs.append((item.marker, [.bulletMarker: depth, .foregroundColor: NSColor.clear]))
         } else if orderedOverlayActive, let displayNumber {
             // Hide the ENTIRE source marker (digits + dot) as one unit and paint
             // the whole display marker "N." over it, so the dot travels with the
