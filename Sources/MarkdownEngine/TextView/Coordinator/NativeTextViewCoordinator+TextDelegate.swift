@@ -92,7 +92,13 @@ extension NativeTextViewCoordinator {
             guard !tv.hasMarkedText() else { return }
             if tv.string != lastSyncedText {
                 let rawText = tv.string
+                // A hop scheduled from THIS document must not write into the
+                // binding after the wrapper swapped to another one: embedders
+                // reseed the binding on swap, and a late write would hand the
+                // previous document's text to the new one.
+                let hopDocumentId = documentId
                 DispatchQueue.main.async {
+                    guard self.documentId == hopDocumentId else { return }
                     self.lastSyncedText = rawText
                     self.text = rawText
                 }
@@ -196,7 +202,10 @@ extension NativeTextViewCoordinator {
             }
 #endif
             if storageState.storage != self.lastSyncedText {
+                // Same stale-hop discipline as the raw-mode sync above.
+                let hopDocumentId = documentId
                 DispatchQueue.main.async {
+                    guard self.documentId == hopDocumentId else { return }
                     self.lastSyncedText = storageState.storage
                     self.text = storageState.storage
                 }
