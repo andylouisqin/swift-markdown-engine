@@ -299,19 +299,35 @@ public struct ListStyle: Sendable {
     public var maximumNestingLevel: Int
     /// Extra line height added on top of the default to give list items room.
     public var extraLineHeight: CGFloat
+    /// Indent (in points) of a TOP-LEVEL list item's marker from the text
+    /// margin. `nil` (the historical behavior) uses `indentPerLevel`, which
+    /// couples the initial jump into a list to the nesting step; embedders
+    /// that want a subtler entry (marker close to the margin) with a full
+    /// step per nesting level set this smaller than `indentPerLevel`.
+    public var firstLineIndent: CGFloat?
+    /// Extra advance (in points) between a `-`/`*`/`+` marker and its
+    /// content — bullets and task items; ordered markers keep their natural
+    /// advance. Implemented as kern on the marker's trailing space and folded
+    /// into the wrapped-line hanging indent, and applied whether the syntax
+    /// is concealed or revealed so the content never shifts while editing.
+    public var markerContentGap: CGFloat
 
     public init(
         helpersEnabled: Bool = true,
         autoClosePairsEnabled: Bool = true,
         indentPerLevel: CGFloat = 27.5,
         maximumNestingLevel: Int = 3,
-        extraLineHeight: CGFloat = 2
+        extraLineHeight: CGFloat = 2,
+        firstLineIndent: CGFloat? = nil,
+        markerContentGap: CGFloat = 0
     ) {
         self.helpersEnabled = helpersEnabled
         self.autoClosePairsEnabled = autoClosePairsEnabled
         self.indentPerLevel = indentPerLevel
         self.maximumNestingLevel = maximumNestingLevel
         self.extraLineHeight = extraLineHeight
+        self.firstLineIndent = firstLineIndent
+        self.markerContentGap = markerContentGap
     }
 
     public static let `default` = ListStyle()

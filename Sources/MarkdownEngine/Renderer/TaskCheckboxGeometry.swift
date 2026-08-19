@@ -17,7 +17,9 @@ import AppKit
 enum TaskCheckboxGeometry {
 
     /// Gap between the box's right edge and the task content's left edge.
-    static let gap: CGFloat = 2.0
+    /// 4pt: 2 read as the text nearly touching the box next to the roomier
+    /// bullet gap (`ListStyle/markerContentGap`).
+    static let gap: CGFloat = 4.0
 
     /// Side length of the square for the given (body) font.
     static func size(for font: NSFont) -> CGFloat {

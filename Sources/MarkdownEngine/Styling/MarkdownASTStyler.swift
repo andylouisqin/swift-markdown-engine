@@ -390,6 +390,12 @@ enum MarkdownASTStyler {
         }()
         let depth = MarkdownLists.indentLevel(from: ws)
         let depthIndent = CGFloat(depth) * ctx.config.lists.indentPerLevel
+        // Marker-to-content gap: kerned onto the marker's trailing space (below)
+        // and folded into the hanging indent here. Ordered markers keep their
+        // natural advance.
+        let markerGap = item.ordered ? 0 : ctx.config.lists.markerContentGap
+        // Top-level markers may sit closer to the margin than one nesting step.
+        let baseIndent = ctx.config.lists.firstLineIndent ?? ctx.config.lists.indentPerLevel
         let ps = NSMutableParagraphStyle()
         let lineHeight = ctx.baseLineHeight + ctx.config.lists.extraLineHeight
         ps.minimumLineHeight = lineHeight
@@ -398,15 +404,30 @@ enum MarkdownASTStyler {
         ps.paragraphSpacing = ctx.baseParagraphSpacing
         ps.paragraphSpacingBefore = 0
         ps.tabStops = []
+        // The tab interval stays the STEP size: a nested item's leading `\t`
+        // must advance one full level even when `firstLineIndent` is smaller.
         ps.defaultTabInterval = ctx.config.lists.indentPerLevel
-        ps.firstLineHeadIndent = ctx.config.lists.indentPerLevel
+        ps.firstLineHeadIndent = baseIndent
         // Wrapped lines hang under the first line's content (indent + marker
         // width). No checkbox-specific extra: the box is a drawn overlay that
         // doesn't change text advance, so adding it here (and only here, not to
         // firstLineHeadIndent) shifted an unchecked task's wrapped lines right
         // of its first line.
-        ps.headIndent = ctx.config.lists.indentPerLevel + depthIndent + markerWidth
+        ps.headIndent = baseIndent + depthIndent + markerWidth + markerGap
         attrs.append((line, [.paragraphStyle: ps]))
+
+        // The gap itself, BEFORE the reveal early-returns: kern is advance,
+        // not decoration, so it must survive caret reveals or the content
+        // would shift sideways every time the syntax shows.
+        if markerGap > 0 {
+            let spacerLoc = NSMaxRange(item.marker)
+            if spacerLoc < NSMaxRange(line) {
+                let ch = ctx.ns.character(at: spacerLoc)
+                if ch == 0x20 || ch == 0x09 {
+                    attrs.append((NSRange(location: spacerLoc, length: 1), [.kern: markerGap]))
+                }
+            }
+        }
 
         // 2. Marker decoration (suppressed while the caret edits the syntax).
         if let box = item.checkbox {

@@ -648,9 +648,12 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
             // markers measured at 16px.
             let diameter = font.pointSize * (depth == 0 ? 0.34 : 0.36)
             let centerX = pos.x + markerWidth / 2
-            // Circles are symmetric, so centering is flip-agnostic: mid
-            // x-height is the marker's optical center next to lowercase text.
-            let centerY = pos.baselineY - font.xHeight / 2
+            // Circles are symmetric, so centering is flip-agnostic. Mid
+            // CAP-height, not mid x-height: an ascender-heavy line reads its
+            // vertical center at the cap midline, and x-height centering sat
+            // the dot visibly low (measured 1.5pt at 16pt against both the
+            // reference app and the line's own ink midpoint).
+            let centerY = pos.baselineY - font.capHeight / 2
             let rect = CGRect(x: centerX - diameter / 2, y: centerY - diameter / 2,
                               width: diameter, height: diameter)
             if depth == 0 {
