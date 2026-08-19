@@ -379,21 +379,79 @@ enum MarkdownASTStyler {
         // Keep the source punctuation (`.` or `)`) when overlaying, so a paren list stays a paren list.
         let orderedPunct = orderedOverlayActive && item.marker.length > 0
             ? ctx.ns.substring(with: NSRange(location: NSMaxRange(item.marker) - 1, length: 1)) : "."
-        // Via the memoized measure — list markers are a tiny repeated set (`- `, `1. `).
-        let markerWidth: CGFloat = {
-            if orderedOverlayActive, let displayNumber {
-                let gap = ctx.ns.substring(with: NSRange(location: NSMaxRange(item.marker),
-                                                         length: item.contentRange.location - NSMaxRange(item.marker)))
-                return HeadingHelpers.textWidth("\(displayNumber)\(orderedPunct)" + gap, font: ctx.baseFont)
+        // ---- Unified content column ----------------------------------------
+        // Every marker type lands its content at ONE x past the indent: the
+        // bullet's `- ` advance plus the configured gap. The alignment is a
+        // kern on the single whitespace char after the marker, sized per type:
+        // bullets take the gap as-is, tasks subtract their collapsed `[ ] `
+        // residue, and ordered markers absorb the difference between their
+        // (display) width and the column — floored at 2pt of gap, so a wide
+        // number pushes past the column instead of colliding into content.
+        let contentColumn = HeadingHelpers.textWidth("- ", font: ctx.baseFont)
+            + ctx.config.lists.markerContentGap
+        let spacerLoc = NSMaxRange(item.marker)
+        let spacerIsWS = spacerLoc < NSMaxRange(line)
+            && (ctx.ns.character(at: spacerLoc) == 0x20 || ctx.ns.character(at: spacerLoc) == 0x09)
+        let spacerKern: CGFloat = {
+            // The unified column engages WITH the gap knob; at the default 0
+            // every advance below reduces to the historical measurement, so
+            // embedders that never opt in render byte-identically.
+            guard ctx.config.lists.markerContentGap > 0 else { return 0 }
+            if item.ordered {
+                let markerW: CGFloat
+                if orderedOverlayActive, let displayNumber {
+                    markerW = HeadingHelpers.textWidth("\(displayNumber)\(orderedPunct)", font: ctx.baseFont)
+                } else {
+                    markerW = HeadingHelpers.textWidth(ctx.ns.substring(with: item.marker), font: ctx.baseFont)
+                }
+                let gapW = HeadingHelpers.textWidth(
+                    ctx.ns.substring(with: NSRange(location: spacerLoc,
+                                                   length: item.contentRange.location - spacerLoc)),
+                    font: ctx.baseFont)
+                return max(contentColumn - markerW - gapW, 2 - gapW)
             }
-            return HeadingHelpers.textWidth(ctx.ns.substring(with: markerGroup), font: ctx.baseFont)
+            if let box = item.checkbox {
+                let dashW = HeadingHelpers.textWidth(
+                    ctx.ns.substring(with: NSRange(location: item.marker.location,
+                                                   length: box.location - item.marker.location)),
+                    font: ctx.baseFont)
+                let residue = HeadingHelpers.textWidth(
+                    ctx.ns.substring(with: NSRange(location: box.location,
+                                                   length: item.contentRange.location - box.location)),
+                    font: ctx.inlineMarkerFont)
+                return contentColumn - dashW - residue
+            }
+            return contentColumn
+                - HeadingHelpers.textWidth(ctx.ns.substring(with: markerGroup), font: ctx.baseFont)
+        }()
+        // Marker-start → content advance, for the wrapped-line hanging indent.
+        // Via the memoized measure — list markers are a tiny repeated set.
+        let markerAdvance: CGFloat = {
+            if item.ordered {
+                let base = HeadingHelpers.textWidth(ctx.ns.substring(with: markerGroup), font: ctx.baseFont)
+                if orderedOverlayActive, let displayNumber {
+                    // The marker chars themselves are kerned raw → display
+                    // width in section 2; measure what actually renders.
+                    let rawW = HeadingHelpers.textWidth(ctx.ns.substring(with: item.marker), font: ctx.baseFont)
+                    let displayW = HeadingHelpers.textWidth("\(displayNumber)\(orderedPunct)", font: ctx.baseFont)
+                    return base - rawW + displayW + spacerKern
+                }
+                return base + spacerKern
+            }
+            if item.checkbox != nil, taskRevealed {
+                // Raw `- [ ] ` on screen: hang under the real revealed advance.
+                return HeadingHelpers.textWidth(ctx.ns.substring(with: markerGroup), font: ctx.baseFont) + spacerKern
+            }
+            guard ctx.config.lists.markerContentGap > 0 else {
+                // Column inactive: the historical measured advance (which for
+                // a hidden task is `- ` only — the collapsed box residue was
+                // always ignored here).
+                return HeadingHelpers.textWidth(ctx.ns.substring(with: markerGroup), font: ctx.baseFont)
+            }
+            return contentColumn
         }()
         let depth = MarkdownLists.indentLevel(from: ws)
         let depthIndent = CGFloat(depth) * ctx.config.lists.indentPerLevel
-        // Marker-to-content gap: kerned onto the marker's trailing space (below)
-        // and folded into the hanging indent here. Ordered markers keep their
-        // natural advance.
-        let markerGap = item.ordered ? 0 : ctx.config.lists.markerContentGap
         // Top-level markers may sit closer to the margin than one nesting step.
         let baseIndent = ctx.config.lists.firstLineIndent ?? ctx.config.lists.indentPerLevel
         let ps = NSMutableParagraphStyle()
@@ -413,20 +471,14 @@ enum MarkdownASTStyler {
         // doesn't change text advance, so adding it here (and only here, not to
         // firstLineHeadIndent) shifted an unchecked task's wrapped lines right
         // of its first line.
-        ps.headIndent = baseIndent + depthIndent + markerWidth + markerGap
+        ps.headIndent = baseIndent + depthIndent + markerAdvance
         attrs.append((line, [.paragraphStyle: ps]))
 
-        // The gap itself, BEFORE the reveal early-returns: kern is advance,
-        // not decoration, so it must survive caret reveals or the content
-        // would shift sideways every time the syntax shows.
-        if markerGap > 0 {
-            let spacerLoc = NSMaxRange(item.marker)
-            if spacerLoc < NSMaxRange(line) {
-                let ch = ctx.ns.character(at: spacerLoc)
-                if ch == 0x20 || ch == 0x09 {
-                    attrs.append((NSRange(location: spacerLoc, length: 1), [.kern: markerGap]))
-                }
-            }
+        // The column kern itself, BEFORE the reveal early-returns: kern is
+        // advance, not decoration, so it must survive caret reveals or the
+        // content would shift sideways every time the syntax shows.
+        if spacerIsWS, abs(spacerKern) > 0.01 {
+            attrs.append((NSRange(location: spacerLoc, length: 1), [.kern: spacerKern]))
         }
 
         // 2. Marker decoration (suppressed while the caret edits the syntax).
@@ -704,7 +756,17 @@ enum MarkdownASTStyler {
             let contentRange = NSRange(location: j, length: max(0, contentEnd - j))
             let tokenRange = NSRange(location: line.location, length: contentEnd - line.location)
 
-            let textIndent = CGFloat(level) * indentPerLevel + indentPerLevel * 0.5
+            let textIndent: CGFloat
+            if ctx.config.blockquote.alignsToListContentColumn {
+                // First letter on the list content column; nesting keeps the
+                // historical step.
+                let column = (ctx.config.lists.firstLineIndent ?? ctx.config.lists.indentPerLevel)
+                    + HeadingHelpers.textWidth("- ", font: ctx.baseFont)
+                    + ctx.config.lists.markerContentGap
+                textIndent = column + CGFloat(level - 1) * indentPerLevel
+            } else {
+                textIndent = CGFloat(level) * indentPerLevel + indentPerLevel * 0.5
+            }
             let para = NSMutableParagraphStyle()
             para.firstLineHeadIndent = textIndent
             para.headIndent = textIndent

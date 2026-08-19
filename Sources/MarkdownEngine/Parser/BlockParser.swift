@@ -407,14 +407,28 @@ enum BlockParser {
         return rest.first == " "
     }
 
-    /// `^[ \t]{0,3}>…` — up to 3 leading spaces/tabs, then a `>`.
+    /// `^[ \t]{0,3}(>[ \t]?)*>[ \t]…` — up to 3 leading spaces/tabs, then a
+    /// `>` run whose FINAL `>` is followed by a space or tab. Stricter than
+    /// CommonMark (which allows `>quote`), deliberately: in a notes editor a
+    /// bare `>` glued to content (`>5`, `>90%`) is far likelier "greater than"
+    /// than a quote, so the trailing space is the opt-in — the same contract
+    /// the bullet marker already has (`- ` converts, `-x` stays literal).
     private static func isBlockquote(_ line: String) -> Bool {
         var rest = Substring(line)
         var indent = 0
         while indent < 3, let c = rest.first, c == " " || c == "\t" {
             rest = rest.dropFirst(); indent += 1
         }
-        return rest.first == ">"
+        guard rest.first == ">" else { return false }
+        while rest.first == ">" {
+            rest = rest.dropFirst()
+            if rest.first == ">" { continue }          // `>>` run keeps scanning
+            guard rest.first == " " || rest.first == "\t" else { return false }
+            let afterWS = rest.dropFirst()
+            if afterWS.first == ">" { rest = afterWS; continue }  // `> > ` nesting
+            return true                                 // final `>` + whitespace
+        }
+        return false
     }
 
     /// A list-item line: optional indent, a bullet (`-`/`*`/`+`) or ordered marker (`1.`/`1)`), then a space/tab.

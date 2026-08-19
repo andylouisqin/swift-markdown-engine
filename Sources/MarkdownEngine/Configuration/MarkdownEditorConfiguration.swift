@@ -470,9 +470,18 @@ public struct InlineLatexStyle: Sendable {
 public struct BlockquoteStyle: Sendable {
     /// Extra height (points) added to the default line height for blockquote lines.
     public var extraLineHeight: CGFloat
+    /// Align quote content to the LIST content column (the bullet's `- `
+    /// advance plus `ListStyle/markerContentGap` past `firstLineIndent`), so
+    /// the first letter of a quote line starts exactly where bullet, numbered
+    /// and task content does. `false` keeps the historical
+    /// `level * 18 + 9` indent. Tracks the font, so it stays aligned at any
+    /// zoom; deeper quote levels still step by the historical 18pt.
+    public var alignsToListContentColumn: Bool
 
-    public init(extraLineHeight: CGFloat = 0) {
+    public init(extraLineHeight: CGFloat = 0,
+                alignsToListContentColumn: Bool = false) {
         self.extraLineHeight = extraLineHeight
+        self.alignsToListContentColumn = alignsToListContentColumn
     }
 
     public static let `default` = BlockquoteStyle()

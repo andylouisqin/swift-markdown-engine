@@ -43,8 +43,10 @@ struct MarkdownLists {
     // Trailing `[ \t]*` so the prefix length covers the space(s) the continuation
     // inserts (`markers + " "`) — otherwise exiting an empty quote leaves a stray
     // space (greedy like listRegex's `\s+`).
+    // The final `>` must be followed by whitespace — the strict form
+    // `BlockParser.isBlockquote` recognizes; `>5` is plain text.
     static let blockquoteRegex = try! NSRegularExpression(
-        pattern: #"^( {0,3})(>+(?:[ \t]+>+)*)[ \t]*"#
+        pattern: #"^( {0,3})(>+(?:[ \t]+>+)*)[ \t]"#
     )
     static let dashNoSpaceRegex = try! NSRegularExpression(pattern: #"^\s*-(?!\s)"#)
     static let leadingWhitespaceRegex = try! NSRegularExpression(pattern: #"^\s*"#)
